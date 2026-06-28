@@ -94,6 +94,7 @@
         const navCollection = currentComponent.activity.interaction.collection;
 
         // --- ИСПРАВЛЕНИЕ: Очищаем коллекцию полностью перед добавлением новых элементов ---
+        // Это очень важно для того, чтобы Lampa перестроила навигацию правильно
         navCollection.list = [];
         navCollection.elements = [];
 
@@ -116,6 +117,14 @@
         navCollection.merge();
         // Передаем обновленные элементы в Lampa для отображения
         currentComponent.update(itemsToDisplay);
+        // Устанавливаем фокус на первый элемент коллекции (кнопку или первую карточку)
+        if (navCollection.list.length > 0) {
+            Lampa.Controller.collectionFocus(navCollection.list[0], currentComponent.body);
+        } else {
+            Lampa.Controller.collectionFocus(sortButtonHtmlElement || null, currentComponent.body);
+            // Если нет вообще карточек, но есть кнопка, пытаемся сфокусироваться на ней.
+        }
+
         console.log('Sort Plugin: Lampa UI updated with sorted items.');
     }
 
@@ -160,15 +169,12 @@
                         showSortMenu();
                     });
 
-                    // Поскольку Lampa.Controller.collectionSet/merge могут вызываться несколько раз,
-                    // лучшим местом для регистрации нашей кнопки является функция updateLampaUI
-                    // Там мы гарантируем, что кнопка всегда будет первой в коллекции.
                     console.log('Sort Plugin: Sort button injected into DOM. Listener added.');
 
                 } else {
                     console.log('Sort Plugin: Sort button already exists in DOM.');
                     // Если кнопка уже есть, убедимся, что на ней есть слушатель
-                    event.body.find('.sort-plugin-button').off('hover:enter').on('hover:enter', function() {
+                    sortButtonEl.off('hover:enter').on('hover:enter', function() {
                         showSortMenu();
                     });
                 }
@@ -176,6 +182,7 @@
                 // --- ИСПРАВЛЕНИЕ: Обновляем UI после build-фазы, чтобы наша кнопка всегда регистрировалась ---
                 // Вызываем updateLampaUI с текущим порядком, чтобы коллекция Lampa обновилась.
                 // Это гарантирует, что наша кнопка будет зарегистрирована в Lampa Controller.
+                // А также установит фокус.
                 updateLampaUI(sortedFavoritesData);
             }
         }
@@ -184,7 +191,8 @@
     // Функция для показа меню сортировки
     function showSortMenu() {
         // Чтобы не дублировать код, если Lampa.Select.show() уже открыто
-        if (Lampa.Select && Lampa.Select.has()) {
+        // Lampa.Select.has() возвращает true, если меню Lampa.Select уже открыто
+        if (Lampa.Select && Lampa.Select.has && Lampa.Select.has()) {
             console.log('Sort Plugin: Select menu already open, ignoring.');
             return;
         }
