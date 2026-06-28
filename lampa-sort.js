@@ -1,33 +1,28 @@
-// ===============================
-// LAMPA SORT PLUGIN (TV FRIENDLY)
-// ===============================
+// LAMPA SORT PLUGIN (TV)
 
-// Основная функция сортировки
+// основная сортировка по названию
 function sortItems() {
-    const container = document.querySelector('.mapping--grid');
+    const container = document.querySelector('.mapping--grid, .mapping--line');
     if (!container) return;
 
     const items = Array.from(container.querySelectorAll('.card'))
-        .filter(el => !el.classList.contains('sort-button')); // исключаем кнопку
+        .filter(el => !el.classList.contains('sort-button'));
 
-    // Сортировка по названию
     items.sort((a, b) => {
         const nameA = (a.querySelector('.card__title')?.innerText || '').toLowerCase();
         const nameB = (b.querySelector('.card__title')?.innerText || '').toLowerCase();
         return nameA.localeCompare(nameB);
     });
 
-    // Перестраиваем DOM
     items.forEach(item => container.appendChild(item));
 
-    // Пересчитываем индексы для ТВ
     const focusables = container.querySelectorAll('.focusable');
     focusables.forEach((el, i) => {
         el.setAttribute('data-index', i);
     });
 }
 
-// Создание кнопки сортировки как карточки
+// кнопка как карточка внутри списка
 function createSortButton() {
     const button = document.createElement('div');
 
@@ -49,7 +44,6 @@ function createSortButton() {
 
     button.innerText = 'Сортировать';
 
-    // Нажатие кнопки
     button.addEventListener('click', () => {
         sortItems();
     });
@@ -57,23 +51,21 @@ function createSortButton() {
     return button;
 }
 
-// Вставка кнопки в начало списка
+// вставка кнопки в начало списка
 function injectSortButton() {
-    const container = document.querySelector('.mapping--grid');
+    const container = document.querySelector('.mapping--grid, .mapping--line');
     if (!container) return;
 
-    // Если кнопка уже есть — не создаём повторно
     if (container.querySelector('.sort-button')) return;
 
     const btn = createSortButton();
     container.prepend(btn);
 
-    // Пересчитываем индексы
     const items = container.querySelectorAll('.focusable');
     items.forEach((el, i) => {
         el.setAttribute('data-index', i);
     });
 }
 
-// Запуск после загрузки страницы
+// запуск после загрузки
 setTimeout(injectSortButton, 800);
