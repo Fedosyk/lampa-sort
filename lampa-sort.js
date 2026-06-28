@@ -2,7 +2,7 @@
 
 // сортировка по названию
 function sortItems() {
-    const container = document.querySelector('.items-line');
+    const container = document.querySelector('.scroll__body.mapping--line');
     if (!container) return;
 
     const items = Array.from(container.querySelectorAll('.card'))
@@ -26,7 +26,7 @@ function sortItems() {
 function createSortButton() {
     const button = document.createElement('div');
 
-    button.classList.add('card', 'focusable', 'sort-button');
+    button.classList.add('card', 'selector', 'focusable', 'sort-button');
     button.setAttribute('focusable', 'true');
     button.setAttribute('tabindex', '0');
     button.setAttribute('data-index', '0');
@@ -44,7 +44,7 @@ function createSortButton() {
 
     button.innerText = 'Сортировать';
 
-    button.addEventListener('click', () => {
+    button.addEventListener('hover:enter', () => {
         sortItems();
     });
 
@@ -53,7 +53,7 @@ function createSortButton() {
 
 // вставка кнопки
 function injectSortButton() {
-    const container = document.querySelector('.items-line');
+    const container = document.querySelector('.scroll__body.mapping--line');
     if (!container) return;
 
     if (container.querySelector('.sort-button')) return;
