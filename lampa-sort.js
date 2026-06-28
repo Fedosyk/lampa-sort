@@ -26,7 +26,7 @@
     // Добавляем шаблон для кнопки сортировки
     // Этот HTML будет использоваться для создания кнопки.
     Lampa.Template.add('sort_button_template', `
-        <div class="card selector focusable sort-button">
+        <div class="card selector focusable sort-plugin-button">
             <div class="card__title">Сортировать</div>
         </div>
     `);
@@ -114,7 +114,7 @@
 
         // Пересоздаем элементы коллекции, сначала добавляя нашу кнопку
         // (если она еще не была добавлена, то ее добавит build-фаза)
-        const currentButton = currentComponent.body.find('.sort-button');
+        const currentButton = currentComponent.body.find('.sort-plugin-button');
         if(currentButton.length && currentButton[0].offsetWidth > 10){ // Проверяем, что кнопка существует и видна
            navCollection.add(currentButton[0]);
         }
@@ -148,7 +148,7 @@
             } else if (event.type === 'build') {
                 console.log('Sort Plugin: Favorite page built. Ready to inject sort button.');
 
-                const sortButtonEl = event.body.find('.sort-button');
+                const sortButtonEl = event.body.find('.sort-plugin-button');
 
                 if (!sortButtonEl.length) {
                     const sortButton = Lampa.Template.get('sort_button_template');
