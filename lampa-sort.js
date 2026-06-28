@@ -1,8 +1,8 @@
-// LAMPA SORT PLUGIN (TV)
+// SORT BUTTON FOR FAVORITES (CF.LAMPA.MX)
 
-// основная сортировка по названию
+// сортировка по названию
 function sortItems() {
-    const container = document.querySelector('.mapping--grid, .mapping--line');
+    const container = document.querySelector('.items-line');
     if (!container) return;
 
     const items = Array.from(container.querySelectorAll('.card'))
@@ -22,7 +22,7 @@ function sortItems() {
     });
 }
 
-// кнопка как карточка внутри списка
+// кнопка как карточка
 function createSortButton() {
     const button = document.createElement('div');
 
@@ -51,9 +51,9 @@ function createSortButton() {
     return button;
 }
 
-// вставка кнопки в начало списка
+// вставка кнопки
 function injectSortButton() {
-    const container = document.querySelector('.mapping--grid, .mapping--line');
+    const container = document.querySelector('.items-line');
     if (!container) return;
 
     if (container.querySelector('.sort-button')) return;
@@ -67,5 +67,5 @@ function injectSortButton() {
     });
 }
 
-// запуск после загрузки
+// запуск
 setTimeout(injectSortButton, 800);
