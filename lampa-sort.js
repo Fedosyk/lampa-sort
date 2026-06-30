@@ -4,32 +4,28 @@
     function startPlugin() {
         Lampa.Listener.follow('app', function (e) {
             if (e.type === 'ready') {
-                addSortButton();
+                listenBookmarksActivity();
             }
         });
     }
 
-    function addSortButton() {
-        // Создаем кнопку для сортировки по алфавиту
-        var button = $('<div class="bookmarks-sort-btn selector" style="margin: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 4px; text-align: center; cursor: pointer;">Сортировать по алфавиту</div>');
+    function listenBookmarksActivity() {
+        // Создаем кнопку сортировки
+        var button = $('<div class="bookmarks-sort-btn selector" style="margin: 20px; padding: 12px; background: rgba(255,255,255,0.08); border-radius: 6px; text-align: center; cursor: pointer; font-weight: bold;">Сортировать по алфавиту</div>');
 
+        // Логика сортировки при клике
         button.on('hover:enter', function () {
-            // Получаем список закладок через официальный метод Lampa
-            // Обычно категория называется 'card', где лежат фильмы/сериалы
             var favoriteList = Lampa.Favorite.get({type: 'card'});
 
             if (favoriteList && favoriteList.length > 0) {
-                // 1. Сортируем массив по названию
                 favoriteList.sort(function (a, b) {
                     var titleA = (a.title || a.name || '').toLowerCase();
                     var titleB = (b.title || b.name || '').toLowerCase();
                     return titleA.localeCompare(titleB, 'ru');
                 });
 
-                // 2. Очищаем старый список в памяти и базе данных
                 Lampa.Favorite.clear({type: 'card'});
 
-                // 3. Записываем отсортированные элементы обратно по одному
                 favoriteList.forEach(function (item) {
                     Lampa.Favorite.add({
                         type: 'card',
@@ -37,27 +33,33 @@
                     });
                 });
 
-                Lampa.Noty.show('Список отсортирован!');
-
-                // 4. Принудительно обновляем экран, если мы в закладках
-                if (Lampa.Activity.active().component === 'bookmarks') {
+                Lampa.Noty.show('Отсортировано! Обновляю страницу...');
+                
+                setTimeout(function() {
                     Lampa.Activity.active().page.reload();
-                }
+                }, 500);
             } else {
-                Lampa.Noty.show('Список «Карточки» пуст.');
+                Lampa.Noty.show('Список пуст');
             }
         });
 
-        // Добавляем кнопку в компонент закладок
-        Lampa.Component.add('bookmarks', function (object) {
-            var origRender = this.render;
-            this.render = function () {
-                var view = origRender.apply(this, arguments);
-                if (view && typeof view.prepend === 'function') {
-                    view.prepend(button);
-                }
-                return view;
-            };
+        // Слушаем переключение экранов в Lampa
+        Lampa.Activity.listener.follow('open', function (e) {
+            if (e.component === 'bookmarks') {
+                // Ждем отрисовки интерфейса и добавляем кнопку на экран закладок
+                setTimeout(function () {
+                    var activity = Lampa.Activity.active();
+                    if (activity && activity.activity && activity.activity.render) {
+                        var container = activity.activity.render();
+                        // Если кнопки еще нет на экране, добавляем ее в самое начало
+                        if (container.find('.bookmarks-sort-btn').length === 0) {
+                            container.prepend(button);
+                            // Принудительно обновляем навигацию пульта, чтобы кнопка стала кликабельной
+                            Lampa.Controller.init();
+                        }
+                    }
+                }, 200);
+            }
         });
     }
 
