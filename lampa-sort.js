@@ -1,216 +1,300 @@
-/*
-    Плагин для Lampa TV - Сортировка Избранного
-    Автор: Gemini
-    Версия: 1.1 (Исправлена проблема с фокусом на Android TV)
-*/
+// ==UserScript==
+// @name        Lampa - Favorites Sorting
+// @description Adds sorting to Lampa Favorites
+// @version     1.0.0
+// @author      Lampa Community
+// @icon        https://lampa.mx/favicon.ico
+// @match       *://lampa.mx/*
+// @grant       none
+// @run-at      document-start
+// ==/UserScript==
 
 (function () {
     'use strict';
 
-    // Вспомогательная функция для проверки, какая активность Lampa активна
-    // и является ли она страницей "Избранное"
-    function isFavoritePage(object) {
-        // Проверяем, существует ли объект и его свойство 'router' равно 'favorites'
-        return object && object.router === 'favorites';
-    }
-
-    // Текущий выбранный метод сортировки. По умолчанию - по дате добавления.
-    let currentSortMethod = 'added_date';
-
-    // Варианты сортировки, которые будут показаны в меню Lampa.Select.show()
-    const sortOptions = [
-        { title: 'По дате добавления', value: 'added_date' },
-        { title: 'По дате выхода', value: 'release_date' },
-        { title: 'По рейтингу', value: 'rating' },
-        { title: 'По названию (А-Я)', value: 'alphabetical' }
-    ];
-
-    // Добавляем шаблон для кнопки сортировки
-    Lampa.Template.add('sort_button_template', `
-        <div class="card selector focusable sort-plugin-button">
-            <div class="card__title">Сортировать</div>
-        </div>
-    `);
-
-    let currentComponent = null; // Ссылка на текущий компонент Lampa, управляющий страницей избранного.
-    let originalFavoritesData = []; // Оригинальные данные избранного.
-    let sortedFavoritesData = []; // Отсортированные данные избранного.
-
-    // --- Функции сортировки ---
-
-    function sortByReleaseDate(a, b) {
-        const dateA = a.first_air_date || a.release_date || '';
-        const dateB = b.first_air_date || b.release_date || '';
-        return new Date(dateB) - new Date(dateA);
-    }
-
-    function sortByRating(a, b) {
-        const ratingA = a.vote_average || 0;
-        const ratingB = b.vote_average || 0;
-        return ratingB - ratingA;
-    }
-
-    function sortByAlphabetical(a, b) {
-        const nameA = (a.title || a.name || '').toLowerCase();
-        const nameB = (b.title || b.name || '').toLowerCase();
-        return nameA.localeCompare(nameB);
-    }
-
-    function sortByAddedDate(a, b) {
-        const indexA = originalFavoritesData.indexOf(a);
-        const indexB = originalFavoritesData.indexOf(b);
-        return indexA - indexB;
-    }
-
-    // Главная функция для выполнения сортировки
-    function performSort(items, method) {
-        let sortedItems = [...items];
-
-        switch (method) {
-            case 'release_date':
-                sortedItems.sort(sortByReleaseDate);
-                break;
-            case 'rating':
-                sortedItems.sort(sortByRating);
-                break;
-            case 'alphabetical':
-                sortedItems.sort(sortByAlphabetical);
-                break;
-            case 'added_date':
-            default:
-                sortedItems = [...originalFavoritesData]; // Возвращаем к исходному порядку
-                break;
+    const {
+        Lampa,
+        Lampa: {
+            Favorite,
+            Storage,
+            Listener,
+            Activity,
+            Controller,
+            Select,
+            Utils,
+            Router,
+            Platform
         }
-        return sortedItems;
+    } = window;
+
+    const SORT_MODES_STORAGE_KEY = 'favorite_sort_mode';
+
+    // --- Helper Functions ---
+
+    function getElementOffset(el) {
+        var rect = el.getBoundingClientRect();
+        return {
+            top: rect.top + window.scrollY,
+            left: rect.left + window.scrollX
+        };
     }
 
-    // Функция для обновления интерфейса Lampa после сортировки
-    function updateLampaUI(itemsToDisplay) {
-        if (!currentComponent || !currentComponent.activity || !currentComponent.activity.interaction) {
-            console.error('Sort Plugin: Lampa component or its interaction is not available for UI update.');
+    function sortArray(array, key, direction = 'asc') {
+        if (!Array.isArray(array)) {
+            return array;
+        }
+
+        const sortedArray = [...array].sort((a, b) => {
+            let valA = a[key];
+            let valB = b[key];
+
+            if (valA === undefined || valA === null) valA = '';
+            if (valB === undefined || valB === null) valB = '';
+
+            if (key === 'title') {
+                valA = valA.localeCompare(valB);
+                valB = valA; // Use localeCompare for alphabetical sort
+            } else if (typeof valA === 'string' && typeof valB === 'string') {
+                valA = parseFloat(valA);
+                valB = parseFloat(valB);
+            }
+
+            if (valA < valB) {
+                return direction === 'asc' ? -1 : 1;
+            }
+            if (valA > valB) {
+                return direction === 'asc' ? 1 : -1;
+            }
+            return 0;
+        });
+
+        return direction === 'asc' ? sortedArray : sortedArray.reverse();
+    }
+
+    function getSortState(category) {
+        const savedState = Storage.get(SORT_MODES_STORAGE_KEY, '{}');
+        const modes = JSON.parse(savedState);
+        return modes[category] || { key: 'id', direction: 'desc' }; // Default sort by id desc
+    }
+
+    function saveSortState(category, state) {
+        const savedState = Storage.get(SORT_MODES_STORAGE_KEY, '{}');
+        const modes = JSON.parse(savedState);
+        modes[category] = state;
+        Storage.set(SORT_MODES_STORAGE_KEY, JSON.stringify(modes));
+    }
+
+    function getHumanReadableSortKey(key) {
+        switch (key) {
+            case 'release_date':
+                return 'Дата выхода';
+            case 'vote_average':
+                return 'Рейтинг';
+            case 'popularity':
+                return 'Популярность';
+            case 'title':
+                return 'Название';
+            default:
+                return 'Дата добавления'; // Default for 'id' or unknown
+        }
+    }
+
+    function getHumanReadableDirection(direction) {
+        return direction === 'asc' ? '↑' : '↓';
+    }
+
+    function applySort(category, sortBy, direction) {
+         // Get the correct array based on category.
+         // Favorite.get() returns the actual card data for the category.
+        let items = Favorite.get({ type: category });
+
+        if (!items || items.length === 0) {
             return;
         }
 
-        const navCollection = currentComponent.activity.interaction.collection;
+        const defaultSortKey = 'id'; // Corresponds to date added
 
-        // --- ИСПРАВЛЕНИЕ: Очищаем коллекцию полностью перед добавлением новых элементов ---
-        // Это очень важно для того, чтобы Lampa перестроила навигацию правильно
-        navCollection.list = [];
-        navCollection.elements = [];
-
-        // --- ИСПРАВЛЕНИЕ: Добавляем нашу кнопку в коллекцию перед другими элементами ---
-        const sortButtonHtmlElement = currentComponent.body.find('.sort-plugin-button')[0];
-        if (sortButtonHtmlElement) {
-            navCollection.add(sortButtonHtmlElement);
+        // Determine the sort key
+        let sortKey = sortBy;
+        if (sortBy === 'date_added') {
+            sortKey = defaultSortKey;
         }
 
-        // Добавляем отсортированные элементы
-        itemsToDisplay.forEach(item => {
-            // Убедитесь, что item.card_element - это реальный DOM-элемент
-            // Lampa ожидает, что в `item.card_element` будет DOM-элемент карточки.
-            if (item.card_element) {
-                navCollection.add(item.card_element);
-            }
-        });
+        const sortedItems = sortArray(items, sortKey, direction);
 
-        // "Перестраиваем" коллекцию Lampa
-        navCollection.merge();
-        // Передаем обновленные элементы в Lampa для отображения
-        currentComponent.update(itemsToDisplay);
-        // Устанавливаем фокус на первый элемент коллекции (кнопку или первую карточку)
-        if (navCollection.list.length > 0) {
-            Lampa.Controller.collectionFocus(navCollection.list[0], currentComponent.body);
-        } else {
-            Lampa.Controller.collectionFocus(sortButtonHtmlElement || null, currentComponent.body);
-            // Если нет вообще карточек, но есть кнопка, пытаемся сфокусироваться на ней.
-        }
+        // Update the main favorite data (which is internally managed by Favorite module)
+        // We need to directly manipulate the internal data structure that Favorite uses
+        // This is a bit of a hack due to lack of direct API for reordering.
+        // We'll find the internal array and replace it.
 
-        console.log('Sort Plugin: Lampa UI updated with sorted items.');
+        const internalFavoriteData = Favorite.read(true); // Read internal data without triggering events
+        internalFavoriteData.card = sortedItems; // Replace the main card list
+
+        // Update specific category array if needed, THIS IS IMPORTANT
+        // The Favorite.get(params) relies on the data[params.type] array for ordering.
+        // So we need to update that array as well.
+        internalFavoriteData[category] = sortedItems.map(item => item.id); // Update the ID list for the category
+
+        // Save the modified data back to storage
+        Storage.set('favorite', internalFavoriteData);
+
+        // Trigger Lampa's internal refresh mechanism
+        Favorite.read(); // This will send the 'state:changed' event and trigger Activity.replace()
     }
 
 
-    // Слушаем события Lampa
-    Lampa.Listener.follow('full', function (event) {
-        // Проверяем, что это наш "Избранное" компонент
-        if (isFavoritePage(event.link.object)) {
-            if (event.type === 'start') {
-                console.log('Sort Plugin: Favorite page started loading.');
-                currentComponent = event.link;
-                // Сохраняем исходные данные при загрузке страницы.
-                originalFavoritesData = Array.isArray(event.link.items) ? [...event.link.items] : [];
-                sortedFavoritesData = [...originalFavoritesData]; // По умолчанию, отсортированные данные равны исходным
+    // --- Main Plugin Logic ---
 
-            } else if (event.type === 'build') {
-                console.log('Sort Plugin: Favorite page built. Attempting to inject sort button.');
-
-                const sortButtonEl = event.body.find('.sort-plugin-button');
-
-                // Если кнопки еще нет, создаем и добавляем ее
-                if (!sortButtonEl.length) {
-                    const sortButton = Lampa.Template.get('sort_button_template');
-
-                    sortButton.css({
-                        width: '160px',
-                        height: '240px',
-                        display: 'flex',
-                        'align-items': 'center',
-                        'justify-content': 'center',
-                        background: 'rgba(255,255,255,0.1)',
-                        'border-radius': '8px',
-                        'margin-right': '10px',
-                        'font-size': '20px',
-                        'text-align': 'center'
-                    });
-
-                    event.body.prepend(sortButton); // Добавляем в DOM
-
-                    // --- ИСПРАВЛЕНИЕ: Добавляем обработчик события после добавления в DOM ---
-                    sortButton.on('hover:enter', function() {
-                        showSortMenu();
-                    });
-
-                    console.log('Sort Plugin: Sort button injected into DOM. Listener added.');
-
-                } else {
-                    console.log('Sort Plugin: Sort button already exists in DOM.');
-                    // Если кнопка уже есть, убедимся, что на ней есть слушатель
-                    sortButtonEl.off('hover:enter').on('hover:enter', function() {
-                        showSortMenu();
-                    });
-                }
-
-                // --- ИСПРАВЛЕНИЕ: Обновляем UI после build-фазы, чтобы наша кнопка всегда регистрировалась ---
-                // Вызываем updateLampaUI с текущим порядком, чтобы коллекция Lampa обновилась.
-                // Это гарантирует, что наша кнопка будет зарегистрирована в Lampa Controller.
-                // А также установит фокус.
-                updateLampaUI(sortedFavoritesData);
-            }
+    // Monitor for changes that indicate the favorites screen is active
+    // We use the router to detect when the 'favorite' or 'bookmarks' route is activated.
+    Listener.follow('router', function (event) {
+        if (event.name === 'favorite' || event.name === 'bookmarks') {
+            // Use a short delay to ensure the Lampa UI is fully rendered
+            setTimeout(addSortButton, 100);
         }
     });
 
-    // Функция для показа меню сортировки
-    function showSortMenu() {
-        // Чтобы не дублировать код, если Lampa.Select.show() уже открыто
-        // Lampa.Select.has() возвращает true, если меню Lampa.Select уже открыто
-        if (Lampa.Select && Lampa.Select.has && Lampa.Select.has()) {
-            console.log('Sort Plugin: Select menu already open, ignoring.');
+    function addSortButton() {
+        // Find the root element of the favorites list
+        // This selector might need adjustment if Lampa's structure changes
+        const favoritesRoot = document.querySelector('.content[data-name="content"] .scrollable');
+
+        // Ensure we are on the actual favorites list and not a sub-category detail view
+        // A simple check could be if the root element exists and has a specific class or attribute
+        // For now, we assume that if we are here, it's a favorites list.
+
+        if (!favoritesRoot) {
+            // console.log("Sorting: Favorites root not found");
             return;
         }
 
-        console.log('Sort Plugin: Showing sort menu.');
+        // Check if the sort button already exists to prevent duplicates
+        if (favoritesRoot.querySelector('.lampa-sort-button')) {
+            // console.log("Sorting: Sort button already exists");
+            return;
+        }
 
-        Lampa.Select.show({
-            title: 'Выберите тип сортировки',
-            items: sortOptions,
-            onSelect: function (selected) {
-                currentSortMethod = selected.value;
-                console.log('Sort Plugin: Selected sort method:', currentSortMethod);
+        // Create the sort button element
+        const sortButton = document.createElement('div');
+        sortButton.className = 'lampa-sort-button selector'; // Use 'selector' for focusability
+        sortButton.innerHTML = `
+            <div class="card">
+                <div class="card__background"></div>
+                <div class="card__layer">
+                    <div class="card__layer-item card__layer-item--lg">
+                        <div class="card__content">
+                            <div class="card__icons">
+                                <div class="card__icon icon--settings">
+                                    <svg class="card__icon-svg" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M7.99992 13.3333C10.8666 13.3333 13.3333 10.8666 13.3333 7.99992C13.3333 5.13325 10.8666 2.66659 7.99992 2.66659C5.13325 2.66659 2.66659 5.13325 2.66659 7.99992C2.66659 10.8666 5.13325 13.3333 7.99992 13.3333Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M11.1866 11.1866L13.7199 13.7199" stroke="white" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M5.48 11.8733L4.05333 13.3" stroke="white" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <path d="M11.8733 5.48L13.3 4.05333" stroke="white" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="card__title">Сортировка</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        favoritesRoot.prepend(sortButton);
 
-                // Сортируем данные и обновляем UI
-                sortedFavoritesData = performSort(originalFavoritesData, currentSortMethod);
-                updateLampaUI(sortedFavoritesData);
+        // Add event listener for selection/focus
+        sortButton.addEventListener('hover:enter', () => {
+            showSortMenu(sortButton);
+        });
+
+        // Ensure the button is focusable and works with navigation
+        // Lampa's 'selector' class typically handles this for remote navigation.
+    }
+
+    function showSortMenu(buttonElement) {
+        const currentUrl = window.location.href;
+        const urlParams = new URL(currentUrl).searchParams;
+        const currentCategory = urlParams.get('category') || 'favorite'; // Default to 'favorite' if no category in URL
+
+        // Determine the current category based on the route.
+        // This assumes that the route parameter for category is passed in the URL.
+        // Adjust this logic if Lampa uses a different mechanism to pass route parameters.
+        let category = 'favorite'; // Default category
+
+        if (currentUrl.includes('/favorite?type=')) {
+            category = currentUrl.split('type=')[1].split('&')[0];
+        } else if (currentUrl.includes('/bookmarks')) {
+            // For the main bookmarks screen, we might need a different way to identify categories
+            // For now, let's assume 'favorite' for simplicity or handle specific known sub-routes
+            category = 'favorite'; // Or a more specific identifier if needed
+        }
+
+
+        const currentState = getSortState(category);
+
+        const menuItems = [
+            {
+                title: `Дата добавления ${getHumanReadableSortKey(currentState.key === 'id' ? 'id' : currentState.key)} ${currentState.key === 'id' ? getHumanReadableDirection(currentState.direction) : ''}`,
+                key: 'id',
+                direction: currentState.key === 'id' ? (currentState.direction === 'asc' ? 'desc' : 'asc') : 'desc'
+            },
+            {
+                title: `Название ${getHumanReadableSortKey('title')} ${currentState.key === 'title' ? getHumanReadableDirection(currentState.direction) : ''}`,
+                key: 'title',
+                direction: currentState.key === 'title' ? (currentState.direction === 'asc' ? 'desc' : 'asc') : 'asc'
+            },
+            {
+                title: `Дата выхода ${getHumanReadableSortKey('release_date')} ${currentState.key === 'release_date' ? getHumanReadableDirection(currentState.direction) : ''}`,
+                key: 'release_date',
+                direction: currentState.key === 'release_date' ? (currentState.direction === 'asc' ? 'desc' : 'asc') : 'asc'
+            },
+            {
+                title: `Рейтинг ${getHumanReadableSortKey('vote_average')} ${currentState.key === 'vote_average' ? getHumanReadableDirection(currentState.direction) : ''}`,
+                key: 'vote_average',
+                direction: currentState.key === 'vote_average' ? (currentState.direction === 'asc' ? 'desc' : 'asc') : 'asc'
+            },
+            {
+                title: `Популярность ${getHumanReadableSortKey('popularity')} ${currentState.key === 'popularity' ? getHumanReadableDirection(currentState.direction) : ''}`,
+                key: 'popularity',
+                direction: currentState.key === 'popularity' ? (currentState.direction === 'asc' ? 'desc' : 'asc') : 'asc'
+            }
+        ];
+
+        // Add separators and dynamic titles
+        menuItems.forEach((item, index) => {
+            // Update title to reflect current selection
+             if (item.key === currentState.key) {
+                 item.title = `${getHumanReadableSortKey(item.key)} ${getHumanReadableDirection(currentState.direction)}`;
+                 item.direction = currentState.direction === 'asc' ? 'desc' : 'asc'; // Toggle direction
+             } else {
+                 item.title = `${getHumanReadableSortKey(item.key)}`;
+                 item.direction = 'asc'; // Default to asc for new selections
+             }
+
+
+            if (index > 0) {
+                menuItems.splice(index, 0, { separator: true });
+            }
+        });
+
+
+        Select.show({
+            title: 'Сортировать по:',
+            items: menuItems,
+            onSelect: (selectedItem) => {
+                if (selectedItem.key) {
+                    const newSortState = { key: selectedItem.key, direction: selectedItem.direction };
+                    saveSortState(category, newSortState);
+                    applySort(category, newSortState.key, newSortState.direction);
+                }
+            },
+            onBack: () => {
+                Controller.toggle('content'); // Go back to the main content view
             }
         });
     }
+
+    // Initial injection point
+    // We could also hook into Lampa's initialization or routing system more deeply if needed.
+    // For now, listening to router events is a reasonable approach.
 
 })();
